@@ -1,0 +1,483 @@
+
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>NFA To DFA Converter</title>
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <meta name="description" content="Convert Simple NFA Table to DFA Table and plot the flow diagram." />
+
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm"
+        crossorigin="anonymous">
+
+    <style>
+        #flowchart svg {
+            max-width: 90% !important;
+        }
+    </style>
+</head>
+
+<body>
+    <h1 class="text-center">NFA To DFA Converter</h1>
+    <hr />
+    <div class="container text-center mt-5">
+        <div id="alertBox" class="alert alert-danger w-100"></div>
+        <h2 class="text-center">NFA Table</h2>
+        <h6 class="text-center text-secondary">Use <strong>NULL</strong> for null transitions</h6>
+        <hr />
+        <table id="nfa-table" class="table table-striped">
+            <thead class="thead-dark">
+                <tr>
+                    <th>State</th>
+                    <th>Transition-A</th>
+                    <th>Transition-B</th>
+                </tr>
+            </thead>
+            <tbody id="nfa-table-data">
+                <tr>
+                    <td contenteditable="true">Q1</td>
+                    <td contenteditable="true">Q1,Q2</td>
+                    <td contenteditable="true">Q3</td>
+                </tr>
+                <tr>
+                    <td contenteditable="true">Q2</td>
+                    <td contenteditable="true">Q3</td>
+                    <td contenteditable="true">Q4</td>
+                </tr>
+                <tr>
+                    <td contenteditable="true">Q3</td>
+                    <td contenteditable="true">Q1,Q2</td>
+                    <td contenteditable="true">Q4</td>
+                </tr>
+                <tr>
+                    <td contenteditable="true">Q4</td>
+                    <td contenteditable="true">Q4</td>
+                    <td contenteditable="true">Q4</td>
+                </tr>
+            </tbody>
+        </table>
+        <div class="form-group text-left">
+            <label for="final-states"><strong>Final States</strong></label>
+            <input class="form-control" id="final-states" aria-describedby="final-states-help" placeholder="e.g. q0,q1,q2">
+            <small id="final-states-help" class="form-text text-muted">Enter list of final states seperated by commas</small>
+        </div>
+        <div class="btn-group mx-auto" role="group">
+            <button class="add-state-btn btn btn-secondary">Add State</button>
+            <button id="process" class="btn btn-primary">Convert</button>
+            <button class="remove-state-btn btn btn-secondary">Remove State</button>
+        </div>
+        <div class="container-fluid nfa-flowchart-container">
+            <h2 class="text-center">NFA Diagram</h2>
+            <h6 class="text-center text-secondary">Final States are shown in diamond boxes</h6>
+        </div>
+        <div class="dfa-container">
+            <h2 class="text-center mt-3">DFA Table (Auto-Generated)</h2>
+            <hr />
+            <table id="dfa-table" class="table table-striped mt-3">
+                <thead class="thead-dark">
+                    <tr>
+                        <th>State</th>
+                        <th>Transition-A</th>
+                        <th>Transition-B</th>
+                    </tr>
+                </thead>
+                <tbody id="dfa-table-data">
+                </tbody>
+            </table>
+            <div class="container-fluid flowchart-container">
+                <h2 class="text-center">DFA Diagram</h2>
+                <h6 class="text-center text-secondary">Final States are shown in diamond boxes</h6>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q"
+        crossorigin="anonymous"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl"
+        crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/mermaid@7.1.0/dist/mermaid.min.js"></script>
+    <script>
+        $(document).ready(function (e) {
+            var nfa_template =
+                '<tr><td contenteditable="true"></td><td contenteditable="true"></td><td contenteditable="true"></td></tr>';
+            var stack = {};
+            var shapes = [];
+            $(".add-state-btn").click(function (e) {
+                $("#nfa-table-data").append(nfa_template);
+            });
+            $(".remove-state-btn").click(function(e){
+                $("#nfa-table-data tr:last").remove();
+            });
+            $("#alertBox").fadeOut();
+            $(".dfa-container").fadeOut();
+            // Bind to Click on Process Btn
+            $("#process").click(function (e) {
+                // Validate form data
+                if (!validateNFA().flag)
+                    return false;
+
+                var data_table = $("#nfa-table-data");
+                var data = data_table.find("tr");
+
+                // re-initialize the variable and containers
+                stack = {};
+                shapes = [];
+
+                // Draw NFA Diagram
+                drawNFA();
+
+                // Hide and Reinitialize DFA Table Container
+                $(".dfa-container").fadeOut();
+                $("#dfa-table-data").empty();
+
+                // Reinitialize DFA Flowchart
+                if($("#flowchart") != undefined)
+                    $("#flowchart").remove();
+                
+                $(".flowchart-container").append('<div id="flowchart"></div>');
+                var flowchart = $("#flowchart");
+                flowchart.html("graph LR\n");
+
+                // Process NFA to DFA
+                var start = data.first();
+                var i = 0;
+
+                while (1) {
+                    var state, transitB, transitB;
+                    if (i == 0) {
+                        // First State
+                        state = data.first().find("td:eq(0)").html();
+                        transitA = data.first().find("td:eq(1)").html();
+                        transitB = data.first().find("td:eq(2)").html();
+                        stack[state] = {
+                            "flag": 1
+                        };
+                    } else {
+                        // ith Iteration
+                        state = getNextUnprocessedState();
+                        transitA = getTransition(state, "A");
+                        transitB = getTransition(state, "B");
+                        setProcessed(state);
+                    }
+                    // Add Flowchart Syntax
+                    flowchart.append(getFlowchartText(state, transitA, "A", isFinalState(state), isFinalState(transitA)));
+                    flowchart.append(getFlowchartText(state, transitB, "B", isFinalState(state), isFinalState(transitB)));
+                    
+                    // Add the conversion to table
+                    $("#dfa-table-data").append(getDFATemplate(state, transitA, transitB));
+
+                    if (!isStateProcessed(transitA) && !isInStack(transitA)) {
+                        // Check if this state is processed
+                        stack[transitA] = {
+                            "flag": 0
+                        };
+                    }
+                    if (!isStateProcessed(transitB) && !isInStack(transitB)) {
+                        // Check if this state is processed
+                        stack[transitB] = {
+                            "flag": 0
+                        };
+                    }
+                    if (isAllProcessed()) {
+                        // End if everything is completed
+                        break;
+                    }
+                    i++;
+                }
+                // Bring Back the DFA container
+                $(".dfa-container").fadeIn();
+                // Draw DFA Flowchart
+                function insertSVG(svgGraph){
+                    flowchart.html(svgGraph);
+                }
+                var t = mermaid.init(undefined, flowchart);
+            });
+            
+            function getFlowchartText(state, transition, symbol, isFinalState, isFinalStateTransition){
+                // Create Diamond or Regular Boxes Based on isFinalState and isFinalStateTransition Flag
+                var str = state;
+    
+                if(isFinalState)
+                    str += "{" + state + "}";
+                else
+                    str += "((" + state + "))";
+                
+                str += "--> |"+symbol+"| " + transition;
+                
+                if(isFinalStateTransition)
+                    str += "{" + transition + "}";
+                else
+                    str += "((" + transition + "))";
+                
+                str +="\n";
+                return str;
+            }
+
+            function isFinalState(state){
+                var finalStates = $("#final-states").val().split(",");
+                var states = state.split(",");
+    
+                for(var x in states){
+                    for(var y in finalStates){
+                        if(states[x] == finalStates[y])
+                            return true;
+                    }
+                }
+                return false;
+            }
+
+            function drawNFA(){
+                
+                var data = $("#nfa-table-data");
+                
+                // Reinitialize the NFA Flowchart Container
+                if($("#nfa-flowchart")!=undefined)
+                    $("#nfa-flowchart").remove();
+                
+                $(".nfa-flowchart-container").append('<div id="nfa-flowchart"></div>');
+                
+                var flowchart = $("#nfa-flowchart");
+                flowchart.html("graph LR\n");
+                
+                // Start Extracting Data for Graph
+                data.find("tr").each(function(i,v){
+                    var state = $(v).find("td:eq(0)").html();
+                    var transitA = $(v).find("td:eq(1)").html();
+                    var transitB = $(v).find("td:eq(2)").html();
+                    
+                    transitA = transitA.split(",");
+                    transitB = transitB.split(",");
+                    
+                    for(var i=0; i<transitA.length; i++)
+                        flowchart.append(getFlowchartText(state, transitA[i], "A", isFinalState(state), isFinalState(transitA[i])));
+                    for(var i=0; i<transitB.length; i++)
+                        flowchart.append(getFlowchartText(state, transitB[i], "B", isFinalState(state), isFinalState(transitB[i])));
+                });
+
+                // Draw Flowchart
+                function insertSVG(svgGraph){
+                    flowchart.html(svgGraph);
+                }
+                var t = mermaid.init(undefined, flowchart);
+            }
+
+            function validateNFA() {
+                /** Validates the data in NFA Table 
+                    1. Checks for empty values
+                    2. Checks for duplicate states
+                    3. Checks for unlined states    
+                **/
+
+                var data_table = $("#nfa-table-data");
+                var data = data_table.find("tr");
+
+                // Prepare return Data
+                var toRet = {
+                    "flag": 1,
+                    "msg": ""
+                }
+                var states = [""];
+                // Check Duplicate or empty states
+                data.find("td:eq(0)").each(function (i, v) {
+                    var isExist = false;
+
+                    // Check if state is empty
+                    if ($(v).html() == "") {
+                        toRet.msg = "Empty states detected";
+                        toRet.flag = 0;
+                        return false;
+                    }
+                    // Populate the states array and check if the state exists in array
+                    for (x in states) {
+                        if (states[x] == $(v).html()) {
+                            isExist = true;
+                            break;
+                        }
+                    }
+                    // Check for isExisy flag
+                    if (!isExist) {
+                        states.push($(v).html());
+                    } else {
+                        toRet.msg = "Duplicate states detected";
+                        toRet.flag = 0;
+                        return false;
+                    }
+                });
+                states.push("NULL");
+                // Continue if all ok 
+                if (toRet.flag == 1) {
+                    // Check Transition Columns
+                    data.find("td:eq(1),td:eq(2)").each(function (i, v) {
+
+                        // Check if empty
+                        if ($(v).html() == "") {
+                            toRet.msg = "Field cannot be empty!";
+                            toRet.flag = 0;
+                            return false;
+                        }
+
+                        // Remove Spaces
+                        $(v).html($(v).html().replace(/[^a-zA-Z0-9,]{1}|(,$)/g, ""));
+
+                        var flag = 1; // For unlinked states
+
+                        // Prepare Transition Array for the cell
+                        var transitions = $(v).html().split(",");
+
+                        for (x in transitions) {
+                            var flag2 = 0; // 1 if state is found in states[] array
+                            for (y in states) {
+                                if (states[y] == transitions[x]) {
+                                    flag2 = 1;
+                                    break;
+                                }
+                            }
+                            if (flag2 == 0) {
+                                flag = 0;
+                                break;
+                            }
+                        }
+                        if (flag == 0) {
+                            toRet.msg = "Unlinked State in Transition Detected!";
+                            toRet.flag = 0;
+                            return false;
+                        }
+                    });
+                }
+                if(toRet.flag == 1){
+                    // Check for Final States
+                    
+                    $("#final-states").val($("#final-states").val().replace(" ", ""));
+                    var finalStates = $("#final-states").val().split(",");
+                    if(finalStates.length == 1 && finalStates[0] == ""){
+                        toRet.msg = "No Final State Found!";
+                        toRet.flag = 0;
+                    }else{
+                        for(x in finalStates){
+                            var flag = 0;
+                            for(y in states){
+                                if(finalStates[x] == states[y]){
+                                    flag = 1;
+                                    break;
+                                }
+                            }
+                            if(!flag){
+                                toRet.msg = "Unknown Final State Detected!";
+                                toRet.flag = 0;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (toRet.flag == 0) {
+                    $("#alertBox").fadeOut().html(toRet.msg).fadeIn();
+                } else {
+                    $("#alertBox").fadeOut();
+                }
+                return toRet;
+            }
+
+            function setProcessed(state) {
+                /** Sets the State Flag to Processed :1  **/
+                stack[state].flag = 1;
+            }
+
+            function getNextUnprocessedState() {
+                /** Returns Next processed State **/
+                for (key in stack) {
+                    if (stack[key].flag == 0) {
+                        return key;
+                    }
+                }
+                return null;
+            }
+
+            function isStateProcessed(state) {
+                /** Returns true if state is processed **/
+                for (key in stack) {
+                    if (key == state) {
+                        if (stack[key].flag == 0) {
+                            return false;
+                        } else {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+
+            function isInStack(state) {
+                /** Returns True if given stack is in stack **/
+                for (key in stack) {
+                    if (key == state) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            function isAllProcessed() {
+                /** Returns True if all states are proccessed **/
+                for (key in stack) {
+                    if (stack[key].flag == 0) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            function getDFATemplate(state, a, b) {
+                /** Generates and returns DFA Table Row Template **/
+                return '<tr><td class="state">{' + state + '}</td><td class="trans-a">{' + a +
+                    '}</td><td class="trans-b">{' + b + '}</td></tr>';
+            }
+
+            function getTransition(state, symbol) {
+                /** Returns Transition for a given state and sybmol **/
+                var data_table = $("#nfa-table-data");
+                var states = data_table.find("tr");
+                var statesToCheck = state.split(","); // Split the compound state to multiple states for matching
+                var app_states = []; // Stores All Matched Transition States
+
+                states.find("td:eq(0)").each(function (i, v) {
+                    for (stateC in statesToCheck) {
+                        if ($(v).html() == statesToCheck[stateC]) {
+                            var temp; // Stores Matched States from NFA
+                            if (symbol == "A") {
+                                temp = data_table.find("tr:eq(" + i + ") td:eq(1)").html().split(",");
+                            } else {
+                                temp = data_table.find("tr:eq(" + i + ") td:eq(2)").html().split(",");
+                            }
+                            for (x in temp) {
+                                if(temp[x] == "NULL")
+                                    continue;
+                                var flag = 0;
+                                for (y in app_states) {
+                                    if (temp[x] == app_states[y]) {
+                                        flag = 1;
+                                        break;
+                                    }
+                                }
+                                if (flag == 0) {
+                                    app_states.push(temp[x]);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                });
+                if(app_states.length == 0){
+                    app_states.push("NULL");
+                }
+                app_states.sort();
+                return app_states.toString();
+            }
+        });
+    </script>
+
+</body>
+
+</html>
